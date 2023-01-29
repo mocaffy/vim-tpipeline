@@ -246,7 +246,7 @@ func tpipeline#update()
 			let left_line = strpart(line, 0, split_point)
 			let right_line = s:line_pfx . strpart(line, split_point + 2)
 		endif
-		let cstream = right_line . "\n"
+		let cstream = tpipeline#util#remove_align(right_line) . "\n"
 		let s:last_writtenline = left_line
 	else
 		let s:last_writtenline = tpipeline#util#remove_align(line)
