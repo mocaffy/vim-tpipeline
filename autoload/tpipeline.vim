@@ -31,6 +31,17 @@ func tpipeline#build_hooks()
 		if g:tpipeline_cursormoved
 			au CursorMoved * call tpipeline#update()
 		endif
+
+		if empty(g:tpipeline_statusline) && !g:tpipeline_tabline
+			if tpipeline#lualine#is_lualine()
+				au OptionSet statusline call tpipeline#lualine#delay_eval()
+				au ModeChanged * call tpipeline#lualine#fix_stl()
+				set laststatus=0
+			elseif g:tpipeline_clearstl
+				au OptionSet statusline if v:option_type == 'global' | call tpipeline#util#clear_stl() | endif
+			endif
+			au OptionSet statusline call tpipeline#update()
+		endif
 	augroup END
 endfunc
 
@@ -85,16 +96,7 @@ func tpipeline#initialize()
 	endif
 	let s:tpipeline_filepath = tpipeline#get_filepath()
 	let s:tpipeline_right_filepath = s:tpipeline_filepath . '-R'
-	augroup tpipelinei
-		if v:vim_did_enter
-			call tpipeline#init_statusline()
-		else
-			au VimEnter * call tpipeline#init_statusline()
-		endif
-	augroup END
 
-	let s:update_pending = 0
-	let s:update_required = 0
 	let s:last_statusline = ''
 	let s:last_writtenline = ''
 	let s:cleanup_delay = 45
@@ -114,11 +116,11 @@ func tpipeline#initialize()
 		let s:clear_stream .= "\n"
 	endif
 
-	let s:job_check = 1
 	let s:needs_cleanup = 0
 
 	let s:is_nvim = has('nvim')
 	let s:has_modechgd = exists('##ModeChanged')
+
 	if s:is_nvim
 		let g:tpipeline_fillchar = ""
 
@@ -128,12 +130,20 @@ func tpipeline#initialize()
 		endif
 		au UIEnter * call tpipeline#util#check_gui()
 	endif
+
+	augroup tpipelinei
+		if v:vim_did_enter
+			call tpipeline#init_statusline()
+		else
+			au VimEnter * call tpipeline#init_statusline()
+		endif
+	augroup END
 endfunc
 
 func tpipeline#fork_job()
 	if g:tpipeline_restore
-		let s:restore_left = system("tmux display-message -p '#{status-left}'")
-		let s:restore_right = system("tmux display-message -p '#{status-right}'")
+		let s:restore_left = systemlist("sh -c 'echo \"\"; tmux display-message -p \"#{status-left}\"'")[-1]
+		let s:restore_right = systemlist("sh -c 'echo \"\"; tmux display-message -p \"#{status-right}\"'")[-1]
 	endif
 	let script = printf("while IFS='$\\n' read -r l; do echo \"$l\" > '%s'", s:tpipeline_filepath)
 	if g:tpipeline_usepane
@@ -186,37 +196,12 @@ func tpipeline#init_statusline()
 				set stl=%!tpipeline#stl#line()
 			endif
 			if g:tpipeline_clearstl
-				let g:tpipeline_statusline = &stl
-				set stl=%#StatusLine#
-				au OptionSet statusline let g:tpipeline_statusline = &stl | set stl=%#StatusLine# | call tpipeline#update()
+				call tpipeline#util#clear_stl()
 			endif
 		endif
 	endif
 
 	call tpipeline#update()
-endfunc
-
-func tpipeline#deferred_update()
-	let s:update_required = 1
-	if s:update_pending
-		return
-	endif
-	let s:update_pending = 1
-	let s:delay_timer = timer_start(0, {-> tpipeline#delayed_update()})
-endfunc
-
-func tpipeline#delayed_update()
-	if s:job_check
-		if (s:is_nvim && s:job < 0) || (!s:is_nvim && job_status(s:job) == 'dead')
-			call tpipeline#state#freeze()
-		endif
-		let s:job_check = 0
-	endif
-	let s:update_pending = 0
-	if s:update_required
-		let s:update_required = 0
-		call tpipeline#update()
-	endif
 endfunc
 
 func tpipeline#update()
@@ -275,6 +260,7 @@ func tpipeline#cleanup()
 		else
 			call job_stop(s:job)
 		endif
+		call tpipeline#state#freeze()
 		call writefile([''], s:tpipeline_filepath, '')
 		if g:tpipeline_split
 			call writefile([''], s:tpipeline_right_filepath, '')
